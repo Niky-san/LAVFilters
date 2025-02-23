@@ -319,6 +319,8 @@ STDMETHODIMP CDecAvcodec::InitDecoder(AVCodecID codec, const CMediaType *pmt)
 
     m_pAVCtx = avcodec_alloc_context3(m_pAVCodec);
     CheckPointer(m_pAVCtx, E_POINTER);
+    // Reset MV-HEVC flag
+    m_bIsMVHEVC = FALSE;
 
     DWORD dwDecFlags = m_pCallback->GetDecodeFlags();
 
@@ -436,6 +438,23 @@ STDMETHODIMP CDecAvcodec::InitDecoder(AVCodecID codec, const CMediaType *pmt)
     {
         DbgLog((LOG_TRACE, 10, L"-> Processing extradata of %d bytes", extralen));
         BYTE *extra = nullptr;
+        
+        // Check for MV-HEVC in extradata
+        if (codec == AV_CODEC_ID_HEVC)
+        {
+            extra = (uint8_t *)av_mallocz(extralen + AV_INPUT_BUFFER_PADDING_SIZE);
+            if (extra)
+            {
+                getExtraData(*pmt, extra, nullptr);
+                if (m_pAVCtx->profile == FF_PROFILE_HEVC_MAIN_MULTIVIEW)
+                {
+                    m_bIsMVHEVC = TRUE;
+                    DbgLog((LOG_TRACE, 10, L"-> Stream identified as MV-HEVC"));
+                }
+                av_freep(&extra);
+            }
+        }
+
         if (pmt->subtype == MEDIASUBTYPE_LAV_RAWVIDEO)
         {
             if (extralen < sizeof(m_pAVCtx->pix_fmt))
@@ -687,6 +706,13 @@ STDMETHODIMP CDecAvcodec::InitDecoder(AVCodecID codec, const CMediaType *pmt)
     {
         DbgLog((LOG_TRACE, 10, L"-> ffmpeg codec opened successfully (ret: %d)", ret));
         m_nCodecId = codec;
+        
+        // Double-check MV-HEVC after decoder is fully initialized
+        if (codec == AV_CODEC_ID_HEVC && m_pAVCtx->profile == FF_PROFILE_HEVC_MAIN_MULTIVIEW)
+        {
+            m_bIsMVHEVC = TRUE;
+            DbgLog((LOG_TRACE, 10, L"-> Confirmed MV-HEVC stream after decoder init"));
+        }
     }
     else
     {
@@ -872,6 +898,16 @@ STDMETHODIMP CDecAvcodec::Decode(const BYTE *buffer, int buflen, REFERENCE_TIME 
                                  BOOL bSyncPoint, BOOL bDiscontinuity, IMediaSample *pSample)
 {
     CheckPointer(m_pAVCtx, E_UNEXPECTED);
+    // Track MV-HEVC status through decoding
+    if (m_nCodecId == AV_CODEC_ID_HEVC && m_bIsMVHEVC)
+    {
+        // Re-check profile in case stream parameters changed
+        if (m_pAVCtx->profile != FF_PROFILE_HEVC_MAIN_MULTIVIEW)
+        {
+            DbgLog((LOG_TRACE, 10, L"-> Stream no longer MV-HEVC"));
+            m_bIsMVHEVC = FALSE;
+        }
+    }
 
     // Put timestamps into the buffers if appropriate
     if (m_pAVCtx->active_thread_type & FF_THREAD_FRAME)
