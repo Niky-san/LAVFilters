@@ -48,7 +48,7 @@ class CDecAvcodec : public CDecBase
     STDMETHODIMP_(BOOL) IsInterlaced(BOOL bAllowGuess);
     STDMETHODIMP_(const WCHAR *) GetDecoderName() { return L"avcodec"; }
     STDMETHODIMP HasThreadSafeBuffers() { return S_OK; }
-
+    STDMETHODIMP_(BOOL) IsMVHEVC() const { return m_bIsMVHEVC; }
     // CDecBase
     STDMETHODIMP Init();
 
@@ -103,4 +103,6 @@ class CDecAvcodec : public CDecBase
     BOOL m_bWaitingForKeyFrame = FALSE;
     int m_iInterlaced = -1;
     int m_nSoftTelecine = 0;
+    // MV-HEVC detection
+    BOOL m_bIsMVHEVC = FALSE;
 };
